@@ -22,6 +22,14 @@ def get_py_from_vp(u_i, v_i, K):
     
     return pitch, yaw
 
+
+# 继承了LaneDetection
+# detect 方法是一样的，输出Mask 概率图。
+# 使用回调函数 __call__，然后会去执行get_fit_and_probs
+# 我们重写了get_fit_and_probs方法，因为LaneDetction 是get_fit_and_probs，调用fit_poly，然后使用 grid 网格去映射像素 uv 到 道路坐标系。
+# 我们重写后，是get_fit_and_probs 调用 _fit_line_v_of_u，然后 uv 平面拟合一次多项式。然后把左右的一次多项式 求解 灭点。然后计算yaw 和 pitch，然后把这个
+# 存入 add_to_pitch_yaw_history，如果然后取平均值，然后输出pitch 和 yaw 给到update_cam_geometry，去更新相机投影模型。
+# 并重新计算 网格（self.cut_v, self.grid = self.cg.precompute_grid()）
 class CalibratedLaneDetector(LaneDetector):
     def __init__(self, calib_cut_v = 200, cam_geom=CameraGeometry(), model_path='./fastai_model.pth'):
         # call parent class constructor

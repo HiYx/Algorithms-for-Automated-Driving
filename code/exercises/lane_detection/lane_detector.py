@@ -8,9 +8,17 @@ class LaneDetector():
     def __init__(self, model_path, cam_geom=CameraGeometry()):
         self.cg = cam_geom
         self.cut_v, self.grid = self.cg.precompute_grid()
+        # grid 这里拿到了roadXYZ_roadframe_iso8855之内的网格，通过图片映射的网格
+        # cut_v 是像素点，最远的像素点
+        
         # TODO: Add variables for your lane segmentation deep learning model
-        # ...
-        self.model = None # change this line
+        if torch.cuda.is_available():
+            self.device = "cuda"
+            self.model = torch.load(model_path).to(self.device)
+        else:
+            self.model = torch.load(model_path, map_location=torch.device("cpu"))
+            self.device = "cpu"
+        self.model.eval()
 
     def read_imagefile_to_array(self, filename):
         image = cv2.imread(filename)
@@ -37,7 +45,14 @@ class LaneDetector():
             prob_left[v,u] = probability(pixel (u,v) is part of left lane boundary)
         """
         # TODO: Use your lane segmentation deep learning model to implement this function
-        raise NotImplementedError
+        with torch.no_grad():
+            image_tensor = img_array.transpose(2,0,1).astype('float32')/255
+            x_tensor = torch.from_numpy(image_tensor).to(self.device).unsqueeze(0)
+            model_output = torch.softmax(self.model.forward(x_tensor), dim=1).cpu().numpy()
+        background, left, right = model_output[0,0,:,:], model_output[0,1,:,:], model_output[0,2,:,:] 
+        
+        return background, left, right
+        
 
     def fit_poly(self, probs):
         """ 
@@ -61,7 +76,20 @@ class LaneDetector():
             np.ravel(probs[self.cut_v:, :]) contains all probability values.
         """
         # TODO: Implement this function. You will need self.cut_v, and self.grid 
-        raise NotImplementedError
+        # ravel函数的功能是将原数组拉伸成为一维数组
+        probs_flat = np.ravel(probs[self.cut_v:, :])# 这个要看推理模型输出的prob是怎么排列的,shape (image_height,image_width),就是一堆概率值
+        # 我们把概率值大于0.3 的点挑出来。然后形成一个mask ，这就是一个索引地址。
+        mask = probs_flat>0.3# 这里生成的是一个列表
+        # 然后根据索引地址，在grid 中找到对应的三维坐标值。因为这就是一个映射关系了。
+        # 对应的 x = self.grid[:,0][mask]  y=self.grid[:,1][mask]
+        if mask.sum() > 0:
+            coeffs = np.polyfit(self.grid[:,0][mask], self.grid[:,1][mask], deg=3, w=probs_flat[mask])
+        else:
+            coeffs = np.array([0.,0.,0.,0.])
+        
+        
+        
+        return np.poly1d(coeffs)
 
     def __call__(self, image):
         if isinstance(image, str):

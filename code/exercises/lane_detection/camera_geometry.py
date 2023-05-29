@@ -9,7 +9,9 @@ def get_intrinsic_matrix(field_of_view_deg, image_width, image_height):
     field_of_view_rad = field_of_view_deg * np.pi/180
     alpha = (image_width / 2.0) / np.tan(field_of_view_rad / 2.)
     # TODO step 1: Complete this function
-    raise NotImplementedError
+    K = np.array([[alpha,0,image_width/2],[0,alpha,image_height/2],[0,0,1]])  
+    
+    return K
 
 def project_polyline(polyline_world, trafo_world_to_cam, K):
     """
@@ -32,7 +34,42 @@ def project_polyline(polyline_world, trafo_world_to_cam, K):
         First column is u, second column is v
     """
     # TODO step 1: Write this function
-    raise NotImplementedError
+    # 得到 M，4 的三维坐标
+    # 生成一个M，1 的数组
+    c = np.ones(polyline_world.shape[0]).transpose()
+    #print("polyline_world.shape:",polyline_world.shape)
+    #print(c.shape)
+    # 插到polyline_world 里面的第3行后面
+    polyline_world = np.insert(polyline_world,3,values=c,axis=1)#对原始数据加入一个全为1的列
+    #print("polyline_world.shape:",polyline_world.T)
+    
+
+    postion_c = trafo_world_to_cam.dot(polyline_world.T)# 4 ×4 * 4× 60
+    #print(postion_c)4  × 60
+    
+    # 归一化
+    #for i in range(polyline_world.shape[0]):
+        #postion_c[:,i]=1/postion_c[2,i]*postion_c[:,i]
+    
+    # 归一化可以直接除以
+    #u = pl_uv_cam[:,0] / pl_uv_cam[:,2]
+    #v = pl_uv_cam[:,1] / pl_uv_cam[:,2]
+    #postion_c[0,:]=postion_c[0,:]/postion_c[2,:]
+    #postion_c[1,:]=postion_c[1,:]/postion_c[2,:]
+    #postion_c[2,:]=postion_c[2,:]/postion_c[2,:]
+    
+    answer = K.dot(postion_c[0:3,:]).T
+    answer[:,0] = answer[:,0] / answer[:,2]
+    answer[:,1] = answer[:,1] / answer[:,2]
+    #answer = (1/answer[:,2]).dot( answer)
+    #print(answer.shape)# (60, 3)
+
+    #print(answer)# (60, 3)
+
+    return answer[:,0:2]
+    
+    
+
 
 
 class CameraGeometry(object):
@@ -48,24 +85,28 @@ class CameraGeometry(object):
         # camera intriniscs and extrinsics
         self.intrinsic_matrix = get_intrinsic_matrix(field_of_view_deg, image_width, image_height)
         self.inverse_intrinsic_matrix = np.linalg.inv(self.intrinsic_matrix)
-        ## Note that "rotation_cam_to_road" has the math symbol R_{rc} in the book
+        ## Note that "rotation_cam_to_road" has the math symbol R_{rc} in the book,# 从相机坐标系 旋转到道路坐标系
         yaw = np.deg2rad(yaw_deg)
         pitch = np.deg2rad(pitch_deg)
         roll = np.deg2rad(roll_deg)
         cy, sy = np.cos(yaw), np.sin(yaw)
         cp, sp = np.cos(pitch), np.sin(pitch)
         cr, sr = np.cos(roll), np.sin(roll)
+        
+        # R_{cr} 从道路坐标系旋转到相机坐标系中
         rotation_road_to_cam = np.array([[cr*cy+sp*sr+sy, cr*sp*sy-cy*sr, -cp*sy],
                                             [cp*sr, cp*cr, sp],
                                             [cr*sy-cy*sp*sr, -cr*cy*sp -sr*sy, cp*cy]])
+        # R_{rc}
         self.rotation_cam_to_road = rotation_road_to_cam.T # for rotation matrices, taking the transpose is the same as inversion
 
         # TODO step 2: replace the 'None' values in the following code with correct expressions
         
-        self.translation_cam_to_road = None
-        self.trafo_cam_to_road = None
+        # Trc
+        self.translation_cam_to_road = self.height * np.array([0, -1, 0]) # 3 × 1
+        self.trafo_cam_to_road = np.vstack(((np.vstack((self.rotation_cam_to_road.T,self.translation_cam_to_road)).T),np.array([0 ,0, 0,1])))
         # compute vector nc. Note that R_{rc}^T = R_{cr}
-        self.road_normal_camframe = None
+        self.road_normal_camframe = self.rotation_cam_to_road.T @ np.array([0, 1, 0]).T
 
 
     def camframe_to_roadframe(self,vec_in_cam_frame):
@@ -87,7 +128,19 @@ class CameraGeometry(object):
             and was mapped by the camera to pixel coordinates u,v
         """
         # TODO step 2: Write this function
-        raise NotImplementedError
+        # uv 转到cam
+        #print(self.road_normal_camframe.T @ self.inverse_intrinsic_matrix @np.array([u, v, 1]).T)
+        tmp = (self.road_normal_camframe.T @ self.inverse_intrinsic_matrix @np.array([u, v, 1]).T)
+        lamuda =self.height /tmp
+        #print(lamuda)
+        XYZcam = lamuda * self.inverse_intrinsic_matrix@np.array([u, v, 1]).T
+        #print(np.hstack((XYZcam,[1])))
+        # cam 转到 road
+        XYZ = self.trafo_cam_to_road @  np.hstack((XYZcam,[1]))
+        #print(XYZ)
+        
+        
+        return XYZcam[0:3]
     
     def uv_to_roadXYZ_roadframe(self,u,v):
         r_camframe = self.uv_to_roadXYZ_camframe(u,v)
@@ -117,9 +170,17 @@ class CameraGeometry(object):
             A list of x,y coordinates. Each element corresponds to the x-y coordinates
             of one pixel [u,v] (v>cut_v).
         """
+        # 这个是 uv 数值
         cut_v = int(self.compute_minimum_v(dist=dist)+1)
         # TODO step 3: compute `grid`
-        grid = None
+        # 转换为 x y,我们得到了所有的x ，y，点，存储在
+        xy = []
+        for v in range(cut_v,self.image_height):
+            for u in range(self.image_width):
+                X,Y,Z = self.uv_to_roadXYZ_roadframe_iso8855(u,v)
+                xy.append(np.array([X,Y]))
+                #xy.append(np.array([X,Y]))
+        grid=np.array(xy)
         return cut_v, grid
 
     def compute_minimum_v(self, dist):
@@ -127,9 +188,10 @@ class CameraGeometry(object):
         Find cut_v such that pixels with v<cut_v are irrelevant for polynomial fitting.
         Everything that is further than `dist` along the road is considered irrelevant.
         """        
-        trafo_road_to_cam = np.linalg.inv(self.trafo_cam_to_road)
-        point_far_away_on_road = trafo_road_to_cam @ np.array([0,0,dist,1])
-        uv_vec = self.intrinsic_matrix @ point_far_away_on_road[:3]
-        uv_vec /= uv_vec[2]
+        trafo_road_to_cam = np.linalg.inv(self.trafo_cam_to_road)# 我理解这里是所谓的Trc,是一个4 ×4 的矩阵
+        point_far_away_on_road = trafo_road_to_cam @ np.array([0,0,dist,1])# 这里是在 道路坐标系 下，距离地面高度为dist 的点进行处理，转到相机坐标系
+        uv_vec = self.intrinsic_matrix @ point_far_away_on_road[:3]# 投影到uv面
+        uv_vec /= uv_vec[2]# 归一化z轴
         cut_v = uv_vec[1]
-        return cut_v
+        #print(cut_v)
+        return cut_v# y数值

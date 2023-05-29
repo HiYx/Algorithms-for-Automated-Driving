@@ -102,7 +102,7 @@ if __name__ == "__main__":
                 "It seems that you computed rotation_cam_to_road correctly!")
 
             compare_arrays(sln_cg.translation_cam_to_road, ex_cg.translation_cam_to_road, 
-                "You did not calculate translation_cam_to_road correctly in your CameraGeometry class.",
+                "You did not calculate translation_cam_to_road correctly in your CameraGeometry class.yanyx",
                 "It seems that you computed translation_cam_to_road correctly!")
 
             compare_arrays(sln_cg.trafo_cam_to_road, ex_cg.trafo_cam_to_road, 
